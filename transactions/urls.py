@@ -1,7 +1,14 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
-from .views import TransactionViewSet
+from .views import TransactionViewSet, AnalyticsView
 
 router = DefaultRouter()
-router.register("transactions", TransactionViewSet, basename="transaction")
+router.register(
+    "transactions",
+    TransactionViewSet,
+    basename="transaction"
+)
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("analytics/", AnalyticsView.as_view(), name="analytics"),
+] + router.urls
