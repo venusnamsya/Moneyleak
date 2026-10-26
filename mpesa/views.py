@@ -1,87 +1,96 @@
 import json
+import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
+from django.db import transaction as db_transaction
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-
-from .models import MpesaTransaction
-import os
-import re
-from decimal import Decimal, InvalidOperation
 from django.views.decorators.http import require_POST
+
+from .models import MpesaTransaction, MpesaCallback
 from mpesa_service import initiate_stk_push
 
 
-@csrf_exempt
-def mpesa_callback(request):
-    if request.method != "POST":
-        return JsonResponse(
-            {"error": "POST required"}, status=405
+def apply_callback(mpesa_transaction, data):
+    callback = data["Body"]["stkCallback"]
+    result_code = int(callback["ResultCode"])
+
+    mpesa_transaction.result_description = callback.get(
+        "ResultDesc", ""
+    )
+    mpesa_transaction.callback_data = data
+
+    if result_code == 0:
+        items = callback.get(
+            "CallbackMetadata", {}
+        ).get("Item", [])
+
+        metadata = {
+            item["Name"]: item.get("Value")
+            for item in items
+        }
+
+        receipt = metadata.get("MpesaReceiptNumber")
+        if not receipt:
+            raise ValueError("Missing M-Pesa receipt number")
+
+        mpesa_transaction.receipt_number = receipt
+        mpesa_transaction.amount = metadata.get(
+            "Amount", mpesa_transaction.amount
         )
 
+        raw_date = metadata.get("TransactionDate")
+        if raw_date:
+            parsed_date = datetime.strptime(
+                str(raw_date), "%Y%m%d%H%M%S"
+            )
+            mpesa_transaction.transaction_date = (
+                timezone.make_aware(parsed_date)
+            )
+
+        mpesa_transaction.status = "SUCCESS"
+    else:
+        mpesa_transaction.status = "FAILED"
+
+    mpesa_transaction.save()
+
+
+@csrf_exempt
+@require_POST
+def mpesa_callback(request):
     try:
         data = json.loads(request.body)
         callback = data["Body"]["stkCallback"]
         checkout_id = callback["CheckoutRequestID"]
-        result_code = callback["ResultCode"]
 
-        transaction = MpesaTransaction.objects.get(
-            checkout_request_id=checkout_id
-        )
-
-        transaction.result_description = callback.get(
-            "ResultDesc", ""
-        )
-        transaction.callback_data = data
-
-        if result_code == 0:
-            items = callback.get(
-                "CallbackMetadata", {}
-            ).get("Item", [])
-
-            metadata = {
-                item["Name"]: item.get("Value")
-                for item in items
-            }
-
-            receipt = metadata.get("MpesaReceiptNumber")
-
-            if not receipt:
-                return JsonResponse(
-                    {"error": "Missing receipt number"},
-                    status=400,
-                )
-
-            transaction.receipt_number = receipt
-            transaction.amount = metadata.get(
-                "Amount", transaction.amount
+        with db_transaction.atomic():
+            mpesa_transaction = (
+                MpesaTransaction.objects.select_for_update()
+                .filter(checkout_request_id=checkout_id)
+                .first()
             )
 
-            raw_date = metadata.get("TransactionDate")
-            if raw_date:
-                parsed_date = datetime.strptime(
-                    str(raw_date), "%Y%m%d%H%M%S"
+            if mpesa_transaction is None:
+                # Save the callback so it isn't lost if the
+                # transaction record has not been created yet.
+                MpesaCallback.objects.update_or_create(
+                    checkout_request_id=checkout_id,
+                    defaults={"payload": data},
                 )
-                transaction.transaction_date = (
-                    timezone.make_aware(parsed_date)
-                )
+            else:
+                apply_callback(mpesa_transaction, data)
 
-            transaction.status = "SUCCESS"
-        else:
-            transaction.status = "FAILED"
+        return JsonResponse({
+            "ResultCode": 0,
+            "ResultDesc": "Accepted",
+        })
 
-        transaction.save()
-
-        return JsonResponse({"ResultCode": 0, "ResultDesc": "Accepted"})
-
-    except MpesaTransaction.DoesNotExist:
-        return JsonResponse(
-            {"error": "Unknown checkout request"}, status=404
-        )
     except (KeyError, ValueError, TypeError, json.JSONDecodeError):
         return JsonResponse(
-            {"error": "Invalid callback payload"}, status=400
+            {"error": "Invalid callback payload"},
+            status=400,
         )
 
 
@@ -92,9 +101,10 @@ def stk_push(request):
         body = json.loads(request.body)
 
         phone = re.sub(r"[\s+]", "", body.get("phone", ""))
+
         if phone.startswith("0"):
             phone = "254" + phone[1:]
-        elif phone.startswith("7") or phone.startswith("1"):
+        elif phone.startswith(("7", "1")):
             phone = "254" + phone
 
         if not re.fullmatch(r"254[17]\d{8}", phone):
@@ -104,11 +114,16 @@ def stk_push(request):
             )
 
         amount = Decimal(str(body.get("amount", "")))
-        if not amount.is_finite() or amount != amount.to_integral_value():
+
+        if (
+            not amount.is_finite()
+            or amount != amount.to_integral_value()
+        ):
             return JsonResponse(
                 {"error": "Amount must be a whole number"},
                 status=400,
             )
+
         if amount < 1 or amount > 150000:
             return JsonResponse(
                 {"error": "Amount is outside the allowed test range"},
@@ -121,33 +136,50 @@ def stk_push(request):
         )
 
         checkout_id = result.get("CheckoutRequestID")
-        if not checkout_id:
+        merchant_id = result.get("MerchantRequestID")
+
+        if not checkout_id or not merchant_id:
             return JsonResponse(
-                {"error": "Daraja did not return a checkout ID",
-                 "daraja": result},
+                {
+                    "error": "Daraja did not return the required request IDs",
+                    "daraja": result,
+                },
                 status=502,
             )
 
-        transaction, created = MpesaTransaction.objects.get_or_create(
-            checkout_request_id=checkout_id,
-            defaults={
-                "merchant_request_id": result.get(
-                    "MerchantRequestID", ""
-                ),
-                "phone_number": phone,
-                "amount": amount,
-                "account_reference": "MoneyLeak",
-                "status": "PENDING",
-            },
-        )
+        with db_transaction.atomic():
+            mpesa_transaction, created = (
+                MpesaTransaction.objects.get_or_create(
+                    checkout_request_id=checkout_id,
+                    defaults={
+                        "merchant_request_id": merchant_id,
+                        "phone_number": phone,
+                        "amount": amount,
+                        "account_reference": "MoneyLeak",
+                        "status": "PENDING",
+                    },
+                )
+            )
+
+            # Apply any callback that arrived before the record existed.
+            pending_callback = MpesaCallback.objects.filter(
+                checkout_request_id=checkout_id
+            ).first()
+
+            if pending_callback:
+                apply_callback(
+                    mpesa_transaction,
+                    pending_callback.payload,
+                )
+                pending_callback.delete()
 
         return JsonResponse({
             "message": "STK Push requested",
-            "status": transaction.status,
+            "status": mpesa_transaction.status,
             "checkout_request_id": checkout_id,
             "created": created,
             "daraja_response": result,
-        }, status=200)
+        })
 
     except (ValueError, InvalidOperation, TypeError, json.JSONDecodeError):
         return JsonResponse(
@@ -155,6 +187,11 @@ def stk_push(request):
             status=400,
         )
     except Exception:
+        # Keep technical details in the server logs, not the response.
+        import logging
+        logging.getLogger(__name__).exception(
+            "STK Push initiation failed"
+        )
         return JsonResponse(
             {"error": "Unable to initiate payment. Check server logs."},
             status=502,

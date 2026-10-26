@@ -38,3 +38,10 @@ class MpesaTransaction(models.Model):
             f"{self.checkout_request_id} - "
             f"{self.status} - KSh {self.amount}"
         )
+class MpesaCallback(models.Model):
+    checkout_request_id = models.CharField(
+        max_length=100,
+        unique=True,
+    )
+    payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
