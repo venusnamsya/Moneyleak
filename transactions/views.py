@@ -20,23 +20,27 @@ class TransactionViewSet(viewsets.ModelViewSet):
 class AnalyticsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get(self, request):
-        transactions = Transaction.objects.filter(user=request.user)
+    def get_queryset(self):
+        queryset = Transaction.objects.filter(user=self.request.user)
 
-        income = transactions.filter(
-            category="Income"
-        ).aggregate(total=Sum("amount"))["total"] or 0
+        category = self.request.query_params.get("category")
+        search = self.request.query_params.get("search")
+        start_date = self.request.query_params.get("start_date")
+        end_date = self.request.query_params.get("end_date")
 
-        expenses = transactions.exclude(
-            category="Income"
-        ).aggregate(total=Sum("amount"))["total"] or 0
+        if category:
+            queryset = queryset.filter(category=category)
 
-        spending = (
-            transactions.exclude(category="Income")
-            .values("category")
-            .annotate(total=Sum("amount"))
-            .order_by("-total")
-        )
+        if search:
+            queryset = queryset.filter(description__icontains=search)
+
+        if start_date:
+             queryset = queryset.filter(date__gte=start_date)
+
+        if end_date:
+            queryset = queryset.filter(date__lte=end_date)
+
+        return queryset
 
         return Response({
             "total_income": f"{income:.2f}",
