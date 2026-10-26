@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'transactions',
     'rest_framework.authtoken',
     'users',
+    'mpesa',
 ]
 
 MIDDLEWARE = [
