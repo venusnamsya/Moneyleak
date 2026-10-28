@@ -11,7 +11,14 @@ class TransactionViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Transaction.objects.filter(user=self.request.user)
+        queryset = Transaction.objects.filter(user=self.request.user)
+       
+        search = self.request.query_params.get("search")
+
+        if search:
+            queryset = queryset.filter(description__icontains=search)
+            
+        return queryset
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
