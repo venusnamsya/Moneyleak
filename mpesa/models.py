@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 
 class MpesaTransaction(models.Model):
@@ -7,6 +8,14 @@ class MpesaTransaction(models.Model):
         ("SUCCESS", "Success"),
         ("FAILED", "Failed"),
     ]
+
+    user = models.ForeignKey(
+         settings.AUTH_USER_MODEL,
+         on_delete=models.CASCADE,
+         related_name="mpesa_transactions",
+         null=True,
+         blank=True,
+    )
 
     checkout_request_id = models.CharField(
         max_length=100, unique=True

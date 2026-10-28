@@ -1,5 +1,6 @@
 import json
 import re
+import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
@@ -9,47 +10,68 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from rest_framework.decorators import (
+    api_view,
+    permission_classes,
+)
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+
 from .models import MpesaTransaction, MpesaCallback
 from mpesa_service import initiate_stk_push
 
+logger = logging.getLogger(__name__)
+
 
 def apply_callback(mpesa_transaction, data):
-    # Use safe .get() defaults to prevent crashes if the payload is malformed
     callback = data.get("Body", {}).get("stkCallback", {})
+
     if not callback:
-        raise ValueError("Invalid structure: missing stkCallback object")
+        raise ValueError("Missing stkCallback object")
 
     result_code = int(callback.get("ResultCode", -1))
 
-    mpesa_transaction.result_description = callback.get("ResultDesc", "")
+    mpesa_transaction.result_description = callback.get(
+        "ResultDesc", ""
+    )
     mpesa_transaction.callback_data = data
 
     if result_code == 0:
-        items = callback.get("CallbackMetadata", {}).get("Item", [])
+        items = callback.get(
+            "CallbackMetadata", {}
+        ).get("Item", [])
 
-        # Extract transaction parameters safely
-        metadata = {}
-        for item in items:
-            name = item.get("Name")
-            # Some items might have a 0 value or falsey metadata, extract cleanly
-            if name:
-                metadata[name] = item.get("Value")
+        metadata = {
+            item.get("Name"): item.get("Value")
+            for item in items
+            if item.get("Name")
+        }
 
         receipt = metadata.get("MpesaReceiptNumber")
+
         if not receipt:
-            raise ValueError("Missing M-Pesa receipt number in success metadata")
+            raise ValueError(
+                "Missing M-Pesa receipt number in success metadata"
+            )
 
         mpesa_transaction.receipt_number = receipt
-        mpesa_transaction.amount = metadata.get("Amount", mpesa_transaction.amount)
+        mpesa_transaction.amount = metadata.get(
+            "Amount", mpesa_transaction.amount
+        )
 
         raw_date = metadata.get("TransactionDate")
+
         if raw_date:
-            parsed_date = datetime.strptime(str(raw_date), "%Y%m%d%H%M%S")
-            mpesa_transaction.transaction_date = timezone.make_aware(parsed_date)
+            parsed_date = datetime.strptime(
+                str(raw_date), "%Y%m%d%H%M%S"
+            )
+            mpesa_transaction.transaction_date = (
+                timezone.make_aware(parsed_date)
+            )
 
         mpesa_transaction.status = "SUCCESS"
     else:
-        # Safely mark the transaction as failed without looking for metadata keys
         mpesa_transaction.status = "FAILED"
 
     mpesa_transaction.save()
@@ -64,7 +86,10 @@ def mpesa_callback(request):
         checkout_id = callback.get("CheckoutRequestID")
 
         if not checkout_id:
-            return JsonResponse({"error": "Missing CheckoutRequestID"}, status=400)
+            return JsonResponse(
+                {"error": "Missing CheckoutRequestID"},
+                status=400,
+            )
 
         with db_transaction.atomic():
             mpesa_transaction = (
@@ -74,8 +99,6 @@ def mpesa_callback(request):
             )
 
             if mpesa_transaction is None:
-                # Save the callback so it isn't lost if the
-                # transaction record has not been created yet.
                 MpesaCallback.objects.update_or_create(
                     checkout_request_id=checkout_id,
                     defaults={"payload": data},
@@ -88,9 +111,13 @@ def mpesa_callback(request):
             "ResultDesc": "Accepted",
         })
 
-    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
-        import logging
-        logging.getLogger(__name__).warning(f"M-Pesa callback parsing failed: {str(e)}")
+    except (
+        KeyError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as exc:
+        logger.warning("M-Pesa callback parsing failed: %s", exc)
         return JsonResponse(
             {"error": "Invalid callback payload structure"},
             status=400,
@@ -100,6 +127,21 @@ def mpesa_callback(request):
 @csrf_exempt
 @require_POST
 def stk_push(request):
+    # Require a valid JWT access token.
+    from rest_framework_simplejwt.authentication import (
+        JWTAuthentication,
+    )
+
+    authenticated = JWTAuthentication().authenticate(request)
+
+    if authenticated is None:
+        return JsonResponse(
+            {"error": "Authentication required. Supply a valid Bearer token."},
+            status=401,
+        )
+
+    user, token = authenticated
+
     try:
         body = json.loads(request.body)
 
@@ -110,19 +152,18 @@ def stk_push(request):
         elif phone.startswith(("7", "1")):
             phone = "254" + phone
 
-        # Sandbox handles broad test numbers, adjusted regex block slightly for flexibility
         if not re.fullmatch(r"254\d{9}", phone):
             return JsonResponse(
-                {"error": "Enter a valid Kenyan mobile number (e.g. 2547XXXXXXXX)"},
+                {
+                    "error": "Enter a valid Kenyan mobile number "
+                             "(e.g. 2547XXXXXXXX)"
+                },
                 status=400,
             )
 
         amount = Decimal(str(body.get("amount", "")))
 
-        if (
-            not amount.is_finite()
-            or amount != amount.to_integral_value()
-        ):
+        if not amount.is_finite() or amount != amount.to_integral_value():
             return JsonResponse(
                 {"error": "Amount must be a whole number"},
                 status=400,
@@ -156,6 +197,7 @@ def stk_push(request):
                 MpesaTransaction.objects.get_or_create(
                     checkout_request_id=checkout_id,
                     defaults={
+                        "user": user,
                         "merchant_request_id": merchant_id,
                         "phone_number": phone,
                         "amount": amount,
@@ -165,7 +207,6 @@ def stk_push(request):
                 )
             )
 
-            # Apply any callback that arrived before the record existed.
             pending_callback = MpesaCallback.objects.filter(
                 checkout_request_id=checkout_id
             ).first()
@@ -185,17 +226,48 @@ def stk_push(request):
             "daraja_response": result,
         })
 
-    except (ValueError, InvalidOperation, TypeError, json.JSONDecodeError):
+    except (
+        ValueError,
+        InvalidOperation,
+        TypeError,
+        json.JSONDecodeError,
+    ):
         return JsonResponse(
             {"error": "Invalid phone number, amount or JSON"},
             status=400,
         )
     except Exception:
-        import logging
-        logging.getLogger(__name__).exception(
-            "STK Push initiation failed"
-        )
+        logger.exception("STK Push initiation failed")
         return JsonResponse(
             {"error": "Unable to initiate payment. Check server logs."},
             status=502,
         )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def mpesa_transaction_history(request):
+    transactions = MpesaTransaction.objects.filter(
+        user=request.user
+    ).order_by("-created_at")
+
+    data = [
+        {
+            "checkout_request_id": item.checkout_request_id,
+            "merchant_request_id": item.merchant_request_id,
+            "receipt_number": item.receipt_number,
+            "phone_number": item.phone_number,
+            "amount": str(item.amount),
+            "transaction_date": item.transaction_date,
+            "account_reference": item.account_reference,
+            "status": item.status,
+            "result_description": item.result_description,
+            "created_at": item.created_at,
+        }
+        for item in transactions
+    ]
+
+    return Response({
+        "count": len(data),
+        "transactions": data,
+    })
