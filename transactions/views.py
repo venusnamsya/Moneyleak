@@ -27,13 +27,13 @@ class TransactionViewSet(viewsets.ModelViewSet):
 class AnalyticsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_queryset(self):
-        queryset = Transaction.objects.filter(user=self.request.user)
+    def get(self, request):
+        queryset = Transaction.objects.filter(user=request.user)
 
-        category = self.request.query_params.get("category")
-        search = self.request.query_params.get("search")
-        start_date = self.request.query_params.get("start_date")
-        end_date = self.request.query_params.get("end_date")
+        category = request.query_params.get("category")
+        search = request.query_params.get("search")
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
 
         if category:
             queryset = queryset.filter(category=category)
@@ -42,12 +42,27 @@ class AnalyticsView(APIView):
             queryset = queryset.filter(description__icontains=search)
 
         if start_date:
-             queryset = queryset.filter(date__gte=start_date)
+            queryset = queryset.filter(date__gte=start_date)
 
         if end_date:
             queryset = queryset.filter(date__lte=end_date)
 
-        return queryset
+        income = queryset.filter(
+            amount__gt=0
+        ).aggregate(total=Sum("amount"))["total"] or 0
+
+        expenses = abs(
+            queryset.filter(
+                amount__lt=0
+            ).aggregate(total=Sum("amount"))["total"] or 0
+        )
+
+        spending = (
+            queryset.filter(amount__lt=0)
+            .values("category")
+            .annotate(total=Sum("amount"))
+            .order_by("-total")
+        )
 
         return Response({
             "total_income": f"{income:.2f}",
@@ -56,7 +71,7 @@ class AnalyticsView(APIView):
             "spending_by_category": [
                 {
                     "category": item["category"],
-                    "total": f'{item["total"]:.2f}'
+                    "total": f"{abs(item['total']):.2f}"
                 }
                 for item in spending
             ]

@@ -49,8 +49,8 @@ def initiate_stk_push(phone, amount, account_reference="MoneyLeak",
         "PartyB": shortcode,
         "PhoneNumber": phone,
         "CallBackURL": os.getenv("MPESA_CALLBACK_URL"),
-        "AccountReference": account_reference[:12],
-        "TransactionDesc": description[:13],
+        "AccountReference": account_reference,
+        "TransactionDesc": description,
     }
 
     response = requests.post(

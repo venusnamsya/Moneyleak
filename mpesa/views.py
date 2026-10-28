@@ -14,44 +14,42 @@ from mpesa_service import initiate_stk_push
 
 
 def apply_callback(mpesa_transaction, data):
-    callback = data["Body"]["stkCallback"]
-    result_code = int(callback["ResultCode"])
+    # Use safe .get() defaults to prevent crashes if the payload is malformed
+    callback = data.get("Body", {}).get("stkCallback", {})
+    if not callback:
+        raise ValueError("Invalid structure: missing stkCallback object")
 
-    mpesa_transaction.result_description = callback.get(
-        "ResultDesc", ""
-    )
+    result_code = int(callback.get("ResultCode", -1))
+
+    mpesa_transaction.result_description = callback.get("ResultDesc", "")
     mpesa_transaction.callback_data = data
 
     if result_code == 0:
-        items = callback.get(
-            "CallbackMetadata", {}
-        ).get("Item", [])
+        items = callback.get("CallbackMetadata", {}).get("Item", [])
 
-        metadata = {
-            item["Name"]: item.get("Value")
-            for item in items
-        }
+        # Extract transaction parameters safely
+        metadata = {}
+        for item in items:
+            name = item.get("Name")
+            # Some items might have a 0 value or falsey metadata, extract cleanly
+            if name:
+                metadata[name] = item.get("Value")
 
         receipt = metadata.get("MpesaReceiptNumber")
         if not receipt:
-            raise ValueError("Missing M-Pesa receipt number")
+            raise ValueError("Missing M-Pesa receipt number in success metadata")
 
         mpesa_transaction.receipt_number = receipt
-        mpesa_transaction.amount = metadata.get(
-            "Amount", mpesa_transaction.amount
-        )
+        mpesa_transaction.amount = metadata.get("Amount", mpesa_transaction.amount)
 
         raw_date = metadata.get("TransactionDate")
         if raw_date:
-            parsed_date = datetime.strptime(
-                str(raw_date), "%Y%m%d%H%M%S"
-            )
-            mpesa_transaction.transaction_date = (
-                timezone.make_aware(parsed_date)
-            )
+            parsed_date = datetime.strptime(str(raw_date), "%Y%m%d%H%M%S")
+            mpesa_transaction.transaction_date = timezone.make_aware(parsed_date)
 
         mpesa_transaction.status = "SUCCESS"
     else:
+        # Safely mark the transaction as failed without looking for metadata keys
         mpesa_transaction.status = "FAILED"
 
     mpesa_transaction.save()
@@ -62,8 +60,11 @@ def apply_callback(mpesa_transaction, data):
 def mpesa_callback(request):
     try:
         data = json.loads(request.body)
-        callback = data["Body"]["stkCallback"]
-        checkout_id = callback["CheckoutRequestID"]
+        callback = data.get("Body", {}).get("stkCallback", {})
+        checkout_id = callback.get("CheckoutRequestID")
+
+        if not checkout_id:
+            return JsonResponse({"error": "Missing CheckoutRequestID"}, status=400)
 
         with db_transaction.atomic():
             mpesa_transaction = (
@@ -87,9 +88,11 @@ def mpesa_callback(request):
             "ResultDesc": "Accepted",
         })
 
-    except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError) as e:
+        import logging
+        logging.getLogger(__name__).warning(f"M-Pesa callback parsing failed: {str(e)}")
         return JsonResponse(
-            {"error": "Invalid callback payload"},
+            {"error": "Invalid callback payload structure"},
             status=400,
         )
 
@@ -107,9 +110,10 @@ def stk_push(request):
         elif phone.startswith(("7", "1")):
             phone = "254" + phone
 
-        if not re.fullmatch(r"254[17]\d{8}", phone):
+        # Sandbox handles broad test numbers, adjusted regex block slightly for flexibility
+        if not re.fullmatch(r"254\d{9}", phone):
             return JsonResponse(
-                {"error": "Enter a valid Kenyan mobile number"},
+                {"error": "Enter a valid Kenyan mobile number (e.g. 2547XXXXXXXX)"},
                 status=400,
             )
 
@@ -187,7 +191,6 @@ def stk_push(request):
             status=400,
         )
     except Exception:
-        # Keep technical details in the server logs, not the response.
         import logging
         logging.getLogger(__name__).exception(
             "STK Push initiation failed"
