@@ -1,80 +1,274 @@
-import { useState } from "react";
-import { Search, Plus, ArrowUpRight, ArrowDownRight, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Search,
+  Plus,
+  ArrowUpRight,
+  ArrowDownRight,
+  X,
+  FileSpreadsheet,
+} from "lucide-react";
+import api from "../services/api";
 
-const initialTransactions = [
-  { id: 1, description: "Supermarket shopping", category: "Food", date: "2026-11-09", amount: 2500 },
-  { id: 2, description: "Monthly allowance", category: "Income", date: "2026-11-08", amount: 15000 },
-  { id: 3, description: "Transport", category: "Transport", date: "2026-11-08", amount: 800 },
-  { id: 4, description: "Electricity tokens", category: "Bills", date: "2026-11-07", amount: 1200 },
+const categories = [
+  "Food",
+  "Transport",
+  "Shopping",
+  "Bills",
+  "Education",
+  "Health",
+  "Entertainment",
+  "Income",
+  "Other",
 ];
 
+function getToday() {
+  const date = new Date();
+  const offset = date.getTimezoneOffset();
+  return new Date(date.getTime() - offset * 60000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function formatCurrency(value) {
+  return Number(value || 0).toLocaleString("en-KE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function Transactions() {
-  const [transactions, setTransactions] = useState(initialTransactions);
+  const [transactions, setTransactions] = useState([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
+
+  const csvInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
 
   const [form, setForm] = useState({
     description: "",
     category: "Food",
-    date: new Date().toISOString().slice(0, 10),
+    date: getToday(),
     amount: "",
   });
 
-  const filteredTransactions = transactions.filter((transaction) => {
-    const matchesSearch = transaction.description
+  // Load transactions from Django.
+  const fetchTransactions = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      const response = await api.get("/api/transactions/");
+
+      const records = Array.isArray(response.data)
+        ? response.data
+        : response.data.results || [];
+
+      setTransactions(records);
+    } catch (err) {
+      console.error(err);
+      setError(
+        err.response?.data?.detail ||
+          "Unable to load transactions. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTransactions();
+  }, []);
+
+  // Filter transactions.
+  const filteredTransactions = transactions.filter((item) => {
+    const matchesSearch = item.description
       .toLowerCase()
       .includes(search.toLowerCase());
 
     const matchesCategory =
-      category === "All" || transaction.category === category;
+      category === "All" || item.category === category;
 
     return matchesSearch && matchesCategory;
   });
 
-  const handleAddTransaction = (event) => {
-    event.preventDefault();
+  // Calculate totals.
+  const totalIncome = transactions
+    .filter((item) => item.category === "Income")
+    .reduce((sum, item) => sum + Number(item.amount), 0);
 
-    if (!form.description.trim() || !form.amount || Number(form.amount) <= 0) {
+  const totalExpenses = transactions
+    .filter((item) => item.category !== "Income")
+    .reduce((sum, item) => sum + Number(item.amount), 0);
+
+  // Add a transaction to Django.
+  const handleAddTransaction = async (event) => {
+    event.preventDefault();
+    setFormError("");
+
+    if (!form.description.trim()) {
+      setFormError("Please enter a description.");
       return;
     }
 
-    setTransactions([
-      {
-        ...form,
-        id: Date.now(),
-        amount: Number(form.amount),
-      },
-      ...transactions,
-    ]);
+    if (!form.amount || Number(form.amount) <= 0) {
+      setFormError("Please enter a valid amount.");
+      return;
+    }
 
-    setForm({
-      description: "",
-      category: "Food",
-      date: new Date().toISOString().slice(0, 10),
-      amount: "",
-    });
+    try {
+      setSaving(true);
 
-    setShowForm(false);
+      const response = await api.post("/api/transactions/", {
+        description: form.description.trim(),
+        category: form.category,
+        date: form.date,
+        amount: form.amount,
+      });
+
+      setTransactions((previous) => [
+        response.data,
+        ...previous,
+      ]);
+
+      setForm({
+        description: "",
+        category: "Food",
+        date: getToday(),
+        amount: "",
+      });
+
+      setShowForm(false);
+    } catch (err) {
+      console.error(err);
+
+      const data = err.response?.data;
+
+      setFormError(
+        data?.description?.[0] ||
+          data?.category?.[0] ||
+          data?.amount?.[0] ||
+          data?.date?.[0] ||
+          data?.detail ||
+          "Unable to save transaction. Please try again."
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Import CSV file into Django.
+  const handleCsvImport = async (event) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    setUploadMessage("");
+    setError("");
+
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      setError("Please select a CSV file.");
+      event.target.value = "";
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      setUploading(true);
+
+      const response = await api.post(
+        "/api/import-csv/",
+        formData
+      );
+
+      setUploadMessage(
+        response.data.message || "CSV imported successfully."
+      );
+
+      await fetchTransactions();
+    } catch (err) {
+      console.error("CSV import error:", err);
+
+      const data = err.response?.data;
+
+      setError(
+        data?.detail ||
+          data?.error ||
+          data?.message ||
+          "CSV import failed. Please check your file and try again."
+      );
+    } finally {
+      setUploading(false);
+      event.target.value = "";
+    }
   };
 
   return (
     <div className="transactions-page">
 
+      {/* PAGE HEADING AND ACTION BUTTONS */}
       <div className="transactions-heading">
         <div>
           <h2>All Transactions</h2>
-          <p>Keep track of every shilling coming in and going out.</p>
+          <p>
+            Keep track of every shilling coming in and going out.
+          </p>
         </div>
 
-        <button
-          className="primary-button"
-          onClick={() => setShowForm(true)}
-        >
-          <Plus size={17} /> Add Transaction
-        </button>
+        <div className="transaction-actions">
+
+          <input
+            ref={csvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            onChange={handleCsvImport}
+          />
+
+          <button
+            type="button"
+            className="cancel-button"
+            onClick={() => csvInputRef.current?.click()}
+            disabled={uploading}
+          >
+            <FileSpreadsheet size={17} />
+            {uploading ? "Importing..." : "Import CSV"}
+          </button>
+
+          <button
+            className="primary-button"
+            onClick={() => {
+              setFormError("");
+              setShowForm(true);
+            }}
+          >
+            <Plus size={17} /> Add Transaction
+          </button>
+
+        </div>
       </div>
 
+      {/* UPLOAD FEEDBACK */}
+      {uploadMessage && (
+        <p className="success-message">
+          {uploadMessage}
+        </p>
+      )}
+
+      {error && (
+        <p className="error-message">
+          {error}
+        </p>
+      )}
+
+      {/* TRANSACTION SUMMARY */}
       <div className="transaction-summary">
         <div className="transaction-summary-card">
           <span>Total Transactions</span>
@@ -84,29 +278,23 @@ function Transactions() {
         <div className="transaction-summary-card">
           <span>Total Income</span>
           <strong className="summary-income">
-            KSh {transactions
-              .filter((item) => item.category === "Income")
-              .reduce((sum, item) => sum + item.amount, 0)
-              .toLocaleString()}
+            KSh {formatCurrency(totalIncome)}
           </strong>
         </div>
 
         <div className="transaction-summary-card">
           <span>Total Expenses</span>
-          <strong>
-            KSh {transactions
-              .filter((item) => item.category !== "Income")
-              .reduce((sum, item) => sum + item.amount, 0)
-              .toLocaleString()}
-          </strong>
+          <strong>KSh {formatCurrency(totalExpenses)}</strong>
         </div>
       </div>
 
+      {/* TRANSACTION TABLE */}
       <section className="dashboard-panel transaction-list-panel">
 
         <div className="transaction-filters">
           <div className="transaction-search">
             <Search size={18} />
+
             <input
               type="text"
               placeholder="Search transactions..."
@@ -121,15 +309,12 @@ function Transactions() {
             className="category-filter"
           >
             <option value="All">All Categories</option>
-            <option value="Food">Food</option>
-            <option value="Transport">Transport</option>
-            <option value="Shopping">Shopping</option>
-            <option value="Bills">Bills</option>
-            <option value="Education">Education</option>
-            <option value="Health">Health</option>
-            <option value="Entertainment">Entertainment</option>
-            <option value="Income">Income</option>
-            <option value="Other">Other</option>
+
+            {categories.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -146,38 +331,65 @@ function Transactions() {
             </thead>
 
             <tbody>
-              {filteredTransactions.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <div className="transaction-name">
-                      <div className={`transaction-icon ${item.category === "Income" ? "income" : "expense"}`}>
-                        {item.category === "Income" ? (
-                          <ArrowDownRight size={17} />
-                        ) : (
-                          <ArrowUpRight size={17} />
-                        )}
-                      </div>
-                      <strong>{item.description}</strong>
-                    </div>
-                  </td>
-
-                  <td>{item.category}</td>
-                  <td>{item.date}</td>
-
-                  <td className={item.category === "Income" ? "amount-income" : "amount-expense"}>
-                    {item.category === "Income" ? "+" : "-"}KSh{" "}
-                    {item.amount.toLocaleString()}
-                  </td>
-
-                  <td>
-                    <span className={item.category === "Income" ? "status-completed" : "transaction-type-expense"}>
-                      {item.category === "Income" ? "Income" : "Expense"}
-                    </span>
+              {loading ? (
+                <tr>
+                  <td colSpan="5" className="empty-transactions">
+                    Loading transactions...
                   </td>
                 </tr>
-              ))}
+              ) : filteredTransactions.length > 0 ? (
+                filteredTransactions.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <div className="transaction-name">
+                        <div
+                          className={`transaction-icon ${
+                            item.category === "Income"
+                              ? "income"
+                              : "expense"
+                          }`}
+                        >
+                          {item.category === "Income" ? (
+                            <ArrowDownRight size={17} />
+                          ) : (
+                            <ArrowUpRight size={17} />
+                          )}
+                        </div>
 
-              {filteredTransactions.length === 0 && (
+                        <strong>{item.description}</strong>
+                      </div>
+                    </td>
+
+                    <td>{item.category}</td>
+                    <td>{item.date}</td>
+
+                    <td
+                      className={
+                        item.category === "Income"
+                          ? "amount-income"
+                          : "amount-expense"
+                      }
+                    >
+                      {item.category === "Income" ? "+" : "-"}KSh{" "}
+                      {formatCurrency(item.amount)}
+                    </td>
+
+                    <td>
+                      <span
+                        className={
+                          item.category === "Income"
+                            ? "status-completed"
+                            : "transaction-type-expense"
+                        }
+                      >
+                        {item.category === "Income"
+                          ? "Income"
+                          : "Expense"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
                 <tr>
                   <td colSpan="5" className="empty-transactions">
                     No transactions found.
@@ -189,9 +401,11 @@ function Transactions() {
         </div>
       </section>
 
+      {/* MANUAL TRANSACTION MODAL */}
       {showForm && (
         <div className="modal-overlay">
           <div className="transaction-modal">
+
             <div className="modal-heading">
               <div>
                 <h3>Add Transaction</h3>
@@ -200,6 +414,7 @@ function Transactions() {
 
               <button
                 className="modal-close"
+                type="button"
                 onClick={() => setShowForm(false)}
               >
                 <X size={20} />
@@ -207,13 +422,17 @@ function Transactions() {
             </div>
 
             <form onSubmit={handleAddTransaction}>
+
               <label>Description</label>
               <input
                 type="text"
                 placeholder="e.g. Grocery shopping"
                 value={form.description}
                 onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
+                  setForm({
+                    ...form,
+                    description: event.target.value,
+                  })
                 }
                 required
               />
@@ -226,7 +445,10 @@ function Transactions() {
                 placeholder="Enter amount"
                 value={form.amount}
                 onChange={(event) =>
-                  setForm({ ...form, amount: event.target.value })
+                  setForm({
+                    ...form,
+                    amount: event.target.value,
+                  })
                 }
                 required
               />
@@ -235,18 +457,17 @@ function Transactions() {
               <select
                 value={form.category}
                 onChange={(event) =>
-                  setForm({ ...form, category: event.target.value })
+                  setForm({
+                    ...form,
+                    category: event.target.value,
+                  })
                 }
               >
-                <option>Food</option>
-                <option>Transport</option>
-                <option>Shopping</option>
-                <option>Bills</option>
-                <option>Education</option>
-                <option>Health</option>
-                <option>Entertainment</option>
-                <option>Income</option>
-                <option>Other</option>
+                {categories.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
               </select>
 
               <label>Date</label>
@@ -254,10 +475,17 @@ function Transactions() {
                 type="date"
                 value={form.date}
                 onChange={(event) =>
-                  setForm({ ...form, date: event.target.value })
+                  setForm({
+                    ...form,
+                    date: event.target.value,
+                  })
                 }
                 required
               />
+
+              {formError && (
+                <p className="error-message">{formError}</p>
+              )}
 
               <div className="modal-actions">
                 <button
@@ -268,10 +496,15 @@ function Transactions() {
                   Cancel
                 </button>
 
-                <button type="submit" className="primary-button">
-                  Save Transaction
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={saving}
+                >
+                  {saving ? "Saving..." : "Save Transaction"}
                 </button>
               </div>
+
             </form>
           </div>
         </div>

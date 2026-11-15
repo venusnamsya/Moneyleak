@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import {
   Wallet,
   TrendingUp,
@@ -22,52 +24,185 @@ import {
 } from "recharts";
 
 import StatCard from "../components/statcard";
+import api from "../services/api";
 
-const monthlyData = [
-  { month: "Jan", income: 45000, expenses: 22000 },
-  { month: "Feb", income: 52000, expenses: 28000 },
-  { month: "Mar", income: 48000, expenses: 25000 },
-  { month: "Apr", income: 61000, expenses: 32000 },
-  { month: "May", income: 55000, expenses: 29000 },
-  { month: "Jun", income: 68000, expenses: 35000 },
+const chartColors = [
+  "#2D6A63",
+  "#82B5A1",
+  "#D6A56F",
+  "#8A9C91",
+  "#C7D2CB",
+  "#A5B4A8",
+  "#647D72",
+  "#C28B62",
+  "#9CA3AF",
 ];
 
-const spendingData = [
-  { name: "Food", value: 8500 },
-  { name: "Transport", value: 5000 },
-  { name: "Shopping", value: 6500 },
-  { name: "Bills", value: 4000 },
-  { name: "Other", value: 3000 },
-];
+const formatCurrency = (value) =>
+  `KSh ${Number(value || 0).toLocaleString("en-KE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
-const chartColors = ["#2D6A63", "#82B5A1", "#D6A56F", "#8A9C91", "#C7D2CB"];
+const getDate = (value) => {
+  if (!value) return null;
 
-const recentTransactions = [
-  { name: "Supermarket shopping", category: "Food", date: "Today, 10:30 AM", amount: -2500 },
-  { name: "Monthly allowance", category: "Income", date: "Yesterday", amount: 15000 },
-  { name: "Transport", category: "Transport", date: "Yesterday", amount: -800 },
-  { name: "Electricity token", category: "Bills", date: "24 Oct 2026", amount: -1200 },
-];
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDate = (value) => {
+  const date = getDate(value);
+
+  if (!date) return "Date unavailable";
+
+  return date.toLocaleDateString("en-KE", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+};
 
 function Dashboard() {
+  const [analytics, setAnalytics] = useState(null);
+  const [transactions, setTransactions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      setError("");
+
+      const [analyticsResult, transactionsResult] =
+        await Promise.allSettled([
+          api.get("/api/analytics/"),
+          api.get("/api/transactions/"),
+        ]);
+
+      if (analyticsResult.status === "fulfilled") {
+        setAnalytics(analyticsResult.value.data);
+      } else {
+        setError("Unable to load financial summary.");
+      }
+
+      if (transactionsResult.status === "fulfilled") {
+        const response = transactionsResult.value.data;
+
+        const records = Array.isArray(response)
+          ? response
+          : response.results || [];
+
+        setTransactions(records);
+      } else {
+        setError((previous) =>
+          previous
+            ? `${previous} Unable to load transactions.`
+            : "Unable to load transactions."
+        );
+      }
+
+      setLoading(false);
+    };
+
+    fetchDashboardData();
+  }, []);
+
+  // Build the last six months from actual transaction records.
+  const monthlyData = (() => {
+    const months = [];
+    const today = new Date();
+
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(
+        today.getFullYear(),
+        today.getMonth() - i,
+        1
+      );
+
+      months.push({
+        key: `${date.getFullYear()}-${date.getMonth()}`,
+        month: date.toLocaleDateString("en-KE", {
+          month: "short",
+        }),
+        income: 0,
+        expenses: 0,
+      });
+    }
+
+    transactions.forEach((transaction) => {
+      const date = getDate(transaction.date);
+
+      if (!date) return;
+
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      const month = months.find((item) => item.key === key);
+
+      if (!month) return;
+
+      const amount = Number(transaction.amount || 0);
+
+      if (transaction.category === "Income") {
+        month.income += amount;
+      } else {
+        month.expenses += amount;
+      }
+    });
+
+    return months;
+  })();
+
+  const spendingData = (analytics?.spending_by_category || []).map(
+    (item) => ({
+      name: item.category,
+      value: Number(item.total || 0),
+    })
+  );
+
+  const recentTransactions = [...transactions]
+    .sort((a, b) => {
+      const dateA = getDate(a.date)?.getTime() || 0;
+      const dateB = getDate(b.date)?.getTime() || 0;
+
+      return dateB - dateA;
+    })
+    .slice(0, 5);
+
   return (
     <div className="dashboard">
 
       <div className="dashboard-welcome">
         <div>
           <h2>Your finances at a glance</h2>
-          <p>Track your money, understand your spending and stay in control.</p>
+          <p>
+            Track your money, understand your spending and stay in control.
+          </p>
         </div>
 
-        <button className="period-button">Last 6 months</button>
+        <button className="period-button">
+          Last 6 months
+        </button>
       </div>
+
+      {error && (
+        <p className="error-message">
+          {error}
+        </p>
+      )}
 
       {/* Financial summary */}
 
       <div className="stats-grid">
         <StatCard
           title="Total Income"
-          amount="KSh 68,000"
+          amount={
+            loading
+              ? "Loading..."
+              : formatCurrency(analytics?.total_income)
+          }
           change="Money received"
           icon={TrendingUp}
           type="positive"
@@ -75,7 +210,11 @@ function Dashboard() {
 
         <StatCard
           title="Total Expenses"
-          amount="KSh 35,000"
+          amount={
+            loading
+              ? "Loading..."
+              : formatCurrency(analytics?.total_expenses)
+          }
           change="Money spent"
           icon={TrendingDown}
           type="negative"
@@ -83,7 +222,11 @@ function Dashboard() {
 
         <StatCard
           title="Available Balance"
-          amount="KSh 33,000"
+          amount={
+            loading
+              ? "Loading..."
+              : formatCurrency(analytics?.balance)
+          }
           change="Income minus expenses"
           icon={Wallet}
           type="positive"
@@ -91,7 +234,11 @@ function Dashboard() {
 
         <StatCard
           title="M-Pesa Spending"
-          amount="KSh 12,500"
+          amount={
+            loading
+              ? "Loading..."
+              : formatCurrency(analytics?.mpesa_expenses)
+          }
           change="Successful payments"
           icon={Smartphone}
           type="neutral"
@@ -108,32 +255,69 @@ function Dashboard() {
               <h3>Income vs Expenses</h3>
               <p>Your monthly financial activity</p>
             </div>
+
             <button className="icon-button">
               <MoreHorizontal size={21} />
             </button>
           </div>
 
           <div className="chart-legend">
-            <span><i className="legend-income"></i> Income</span>
-            <span><i className="legend-expenses"></i> Expenses</span>
+            <span>
+              <i className="legend-income"></i> Income
+            </span>
+            <span>
+              <i className="legend-expenses"></i> Expenses
+            </span>
           </div>
 
           <div className="line-chart">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={monthlyData}>
                 <defs>
-                  <linearGradient id="incomeFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#2D6A63" stopOpacity={0.2} />
-                    <stop offset="100%" stopColor="#2D6A63" stopOpacity={0} />
+                  <linearGradient
+                    id="incomeFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor="#2D6A63"
+                      stopOpacity={0.2}
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="#2D6A63"
+                      stopOpacity={0}
+                    />
                   </linearGradient>
 
-                  <linearGradient id="expenseFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#D6A56F" stopOpacity={0.2} />
-                    <stop offset="100%" stopColor="#D6A56F" stopOpacity={0} />
+                  <linearGradient
+                    id="expenseFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor="#D6A56F"
+                      stopOpacity={0.2}
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="#D6A56F"
+                      stopOpacity={0}
+                    />
                   </linearGradient>
                 </defs>
 
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EDF0EC" />
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  vertical={false}
+                  stroke="#EDF0EC"
+                />
 
                 <XAxis
                   dataKey="month"
@@ -150,7 +334,7 @@ function Dashboard() {
                 />
 
                 <Tooltip
-                  formatter={(value) => `KSh ${value.toLocaleString()}`}
+                  formatter={(value) => formatCurrency(value)}
                 />
 
                 <Area
@@ -193,24 +377,43 @@ function Dashboard() {
                   paddingAngle={3}
                 >
                   {spendingData.map((entry, index) => (
-                    <Cell key={entry.name} fill={chartColors[index]} />
+                    <Cell
+                      key={entry.name}
+                      fill={chartColors[index % chartColors.length]}
+                    />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value) => `KSh ${value.toLocaleString()}`} />
+
+                <Tooltip
+                  formatter={(value) => formatCurrency(value)}
+                />
               </PieChart>
             </ResponsiveContainer>
           </div>
 
           <div className="spending-legend">
             {spendingData.map((item, index) => (
-              <div className="spending-legend-item" key={item.name}>
+              <div
+                className="spending-legend-item"
+                key={item.name}
+              >
                 <span>
-                  <i style={{ backgroundColor: chartColors[index] }}></i>
+                  <i
+                    style={{
+                      backgroundColor:
+                        chartColors[index % chartColors.length],
+                    }}
+                  ></i>
                   {item.name}
                 </span>
-                <strong>KSh {item.value.toLocaleString()}</strong>
+
+                <strong>{formatCurrency(item.value)}</strong>
               </div>
             ))}
+
+            {!loading && spendingData.length === 0 && (
+              <p>No spending records available yet.</p>
+            )}
           </div>
         </section>
       </div>
@@ -242,34 +445,69 @@ function Dashboard() {
             </thead>
 
             <tbody>
-              {recentTransactions.map((transaction, index) => (
-                <tr key={index}>
-                  <td>
-                    <div className="transaction-name">
-                      <div className={`transaction-icon ${transaction.amount > 0 ? "income" : "expense"}`}>
-                        {transaction.amount > 0 ? (
-                          <ArrowDownRight size={17} />
-                        ) : (
-                          <ArrowUpRight size={17} />
-                        )}
+              {recentTransactions.map((transaction) => {
+                const isIncome = transaction.category === "Income";
+                const amount = Number(transaction.amount || 0);
+
+                return (
+                  <tr key={transaction.id}>
+                    <td>
+                      <div className="transaction-name">
+                        <div
+                          className={`transaction-icon ${
+                            isIncome ? "income" : "expense"
+                          }`}
+                        >
+                          {isIncome ? (
+                            <ArrowDownRight size={17} />
+                          ) : (
+                            <ArrowUpRight size={17} />
+                          )}
+                        </div>
+
+                        <strong>{transaction.description}</strong>
                       </div>
-                      <strong>{transaction.name}</strong>
-                    </div>
-                  </td>
+                    </td>
 
-                  <td>{transaction.category}</td>
-                  <td>{transaction.date}</td>
+                    <td>{transaction.category}</td>
 
-                  <td className={transaction.amount > 0 ? "amount-income" : "amount-expense"}>
-                    {transaction.amount > 0 ? "+" : "-"}KSh{" "}
-                    {Math.abs(transaction.amount).toLocaleString()}
-                  </td>
+                    <td>{formatDate(transaction.date)}</td>
 
-                  <td>
-                    <span className="status-completed">Completed</span>
+                    <td
+                      className={
+                        isIncome
+                          ? "amount-income"
+                          : "amount-expense"
+                      }
+                    >
+                      {isIncome ? "+" : "-"}
+                      {formatCurrency(Math.abs(amount))}
+                    </td>
+
+                    <td>
+                      <span className="status-completed">
+                        Recorded
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {!loading && recentTransactions.length === 0 && (
+                <tr>
+                  <td colSpan="5">
+                    No transactions recorded yet.
                   </td>
                 </tr>
-              ))}
+              )}
+
+              {loading && (
+                <tr>
+                  <td colSpan="5">
+                    Loading transactions...
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
