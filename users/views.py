@@ -44,4 +44,5 @@ def user_profile(request):
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "phone_number": user.phone_number,
     })

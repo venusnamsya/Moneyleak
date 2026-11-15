@@ -15,6 +15,57 @@
   --white: #ffffff;
   --muted: #89948f;
   --border: #e9ece8;
+  --page-text: #25332f;
+  --surface-hover: #f0f3ef;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --emerald-dark: #102f29;
+  --emerald: #3c887b;
+  --emerald-light: #203d36;
+  --ivory: #141d1a;
+  --white: #1e2925;
+  --muted: #a0ada6;
+  --border: #34433c;
+
+  --page-text: #e5eee9;
+  --surface-hover: #293831;
+}
+
+body {
+  color: var(--page-text);
+  background: var(--ivory);
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+.topbar-heading h1 {
+  color: var(--page-text);
+}
+
+.topbar-search input {
+  background: transparent;
+  color: var(--page-text);
+}
+
+.profile-button {
+  color: var(--page-text);
+}
+
+.topbar-dropdown {
+  color: var(--page-text);
+}
+
+input,
+select,
+textarea {
+  color: var(--page-text);
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea {
+  background-color: var(--white);
 }
 
 * {
@@ -36,6 +87,22 @@ input {
 
 button {
   cursor: pointer;
+}
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--white);
+  color: var(--page-text);
+  transition: 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-hover);
 }
 
 /* Main layout */
@@ -287,6 +354,75 @@ button {
   color: var(--muted);
   font-size: 10px;
   margin-top: 3px;
+}
+.topbar-menu-wrapper {
+  position: relative;
+}
+
+.topbar-dropdown {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+  width: 260px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.10);
+  z-index: 100;
+}
+
+.dropdown-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+
+.dropdown-user strong,
+.dropdown-user small {
+  display: block;
+}
+
+.dropdown-user strong {
+  font-size: 13px;
+}
+
+.dropdown-user small {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.dropdown-action {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px 0 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: #b64d4d;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.empty-notifications {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.search-clear {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
 }
 
 /* Stat cards */

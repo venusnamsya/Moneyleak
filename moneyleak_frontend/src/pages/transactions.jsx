@@ -7,6 +7,7 @@ import {
   X,
   FileSpreadsheet,
 } from "lucide-react";
+import {useSearchParams} from "react-router-dom";
 import api from "../services/api";
 
 const categories = [
@@ -38,7 +39,10 @@ function formatCurrency(value) {
 
 function Transactions() {
   const [transactions, setTransactions] = useState([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(
+    searchParams.get("search") || ""
+  );
+  const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);

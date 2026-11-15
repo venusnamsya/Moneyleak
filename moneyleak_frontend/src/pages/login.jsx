@@ -34,6 +34,7 @@ export default function Login() {
         await api.post("/api/auth/register/", {
           username,
           email,
+          phone,
           password,
         });
 
@@ -57,7 +58,7 @@ export default function Login() {
           response.data.refresh
         );
 
-        navigate("/");
+        navigate("/dashboard");
       }
     } catch (err) {
       const data = err.response?.data;
