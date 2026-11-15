@@ -1,0 +1,66 @@
+
+CATEGORY_DESCRIPTIONS = {
+    "Food": [
+        "Groceries",
+        "Restaurant",
+        "Takeaway",
+        "Bakery",
+        "Butchery",
+        "Other",
+    ],
+    "Transport": [
+        "Matatu",
+        "Taxi",
+        "Fuel",
+        "Parking",
+        "Public transport",
+        "Other",
+    ],
+    "Shopping": [
+        "Clothing",
+        "Electronics",
+        "Household items",
+        "Personal care",
+        "Other",
+    ],
+    "Bills": [
+        "Electricity",
+        "Water",
+        "Internet",
+        "Rent",
+        "Other",
+    ],
+    "Education": [
+        "Tuition",
+        "School fees",
+        "Books",
+        "Learning materials",
+        "Other",
+    ],
+    "Health": [
+        "Medication",
+        "Medical consultation",
+        "Laboratory",
+        "Hospital",
+        "Other",
+    ],
+    "Entertainment": [
+        "Movies",
+        "Subscriptions",
+        "Gaming",
+        "Events",
+        "Other",
+    ],
+    "Income": [
+        "Salary",
+        "Business income",
+        "Allowance",
+        "Interest",
+        "Other",
+    ],
+    "Other": [
+        "General expense",
+        "Unclassified",
+        "Other",
+    ],
+}
