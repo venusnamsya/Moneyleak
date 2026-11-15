@@ -136,6 +136,33 @@ def stk_push(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        category = str(request.data.get("category", "")).strip()
+        description = str(request.data.get("description", "")).strip()
+
+        allowed_categories = {
+            choice[0]
+            for choice in MpesaTransaction.CATEGORY_CHOICES
+            if choice[0] != "Income"
+        }
+
+        if category not in allowed_categories:
+            return Response(
+                {"error": "Please select a valid expense category."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not description:
+            return Response(
+                {"error": "Please enter a payment description."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if len(description) > 255:
+            return Response(
+                {"error": "Description cannot exceed 255 characters."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         result = initiate_stk_push(
             phone=phone,
             amount=int(amount)
@@ -159,6 +186,8 @@ def stk_push(request):
                         "merchant_request_id": merchant_id,
                         "phone_number": phone,
                         "amount": amount,
+                        "category": category,
+                        "description": description,
                         "account_reference": "MoneyLeak",
                         "status": "PENDING",
                     }
@@ -180,6 +209,8 @@ def stk_push(request):
             "message": "STK Push requested",
             "status": mpesa_transaction.status,
             "checkout_request_id": checkout_id,
+            "category": mpesa_transaction.category,
+            "description": mpesa_transaction.description,
             "created": created,
         })
 
@@ -211,11 +242,16 @@ def mpesa_transaction_history(request):
             "receipt_number": item.receipt_number,
             "phone_number": item.phone_number,
             "amount": str(item.amount),
-            "transaction_date": item.transaction_date,
+            "category": item.category,
+            "description": item.description,
+            "transaction_date": (
+                item.transaction_date.isoformat()
+                if item.transaction_date else None
+            ),
             "account_reference": item.account_reference,
             "status": item.status,
             "result_description": item.result_description,
-            "created_at": item.created_at,
+            "created_at": item.created_at.isoformat(),
         }
         for item in transactions
     ]

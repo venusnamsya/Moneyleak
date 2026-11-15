@@ -9,12 +9,24 @@ class MpesaTransaction(models.Model):
         ("FAILED", "Failed"),
     ]
 
+    CATEGORY_CHOICES = [
+        ("Food", "Food"),
+        ("Transport", "Transport"),
+        ("Shopping", "Shopping"),
+        ("Bills", "Bills"),
+        ("Education", "Education"),
+        ("Health", "Health"),
+        ("Entertainment", "Entertainment"),
+        ("Income", "Income"),
+        ("Other", "Other"),
+    ]
+
     user = models.ForeignKey(
-         settings.AUTH_USER_MODEL,
-         on_delete=models.CASCADE,
-         related_name="mpesa_transactions",
-         null=True,
-         blank=True,
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mpesa_transactions",
+        null=True,
+        blank=True,
     )
 
     checkout_request_id = models.CharField(
@@ -28,6 +40,18 @@ class MpesaTransaction(models.Model):
     )
     phone_number = models.CharField(max_length=20)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+
+    category = models.CharField(
+        max_length=30,
+        choices=CATEGORY_CHOICES,
+        default="Other",
+    )
+    description = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+
     transaction_date = models.DateTimeField(null=True, blank=True)
     account_reference = models.CharField(
         max_length=100, blank=True
@@ -47,6 +71,8 @@ class MpesaTransaction(models.Model):
             f"{self.checkout_request_id} - "
             f"{self.status} - KSh {self.amount}"
         )
+
+
 class MpesaCallback(models.Model):
     checkout_request_id = models.CharField(
         max_length=100,
