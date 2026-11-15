@@ -1,9 +1,11 @@
-from rest_framework import viewsets, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from django.db.models import Sum, Q
+from rest_framework import permissions, viewsets
+from django.db.models import Sum
+
 from .models import Transaction
 from .serializers import TransactionSerializer
+from mpesa.models import MpesaTransaction
 
 
 class TransactionViewSet(viewsets.ModelViewSet):
@@ -12,12 +14,14 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Transaction.objects.filter(user=self.request.user)
-       
+
         search = self.request.query_params.get("search")
 
         if search:
-            queryset = queryset.filter(description__icontains=search)
-            
+            queryset = queryset.filter(
+                description__icontains=search
+            )
+
         return queryset
 
     def perform_create(self, serializer):
@@ -39,7 +43,9 @@ class AnalyticsView(APIView):
             queryset = queryset.filter(category=category)
 
         if search:
-            queryset = queryset.filter(description__icontains=search)
+            queryset = queryset.filter(
+                description__icontains=search
+            )
 
         if start_date:
             queryset = queryset.filter(date__gte=start_date)
@@ -48,30 +54,51 @@ class AnalyticsView(APIView):
             queryset = queryset.filter(date__lte=end_date)
 
         income = queryset.filter(
-            amount__gt=0
+            category="Income"
         ).aggregate(total=Sum("amount"))["total"] or 0
 
-        expenses = abs(
-            queryset.filter(
-                amount__lt=0
-            ).aggregate(total=Sum("amount"))["total"] or 0
-        )
+        expenses = queryset.exclude(
+            category="Income"
+        ).aggregate(total=Sum("amount"))["total"] or 0
 
         spending = (
-            queryset.filter(amount__lt=0)
+            queryset.exclude(category="Income")
             .values("category")
             .annotate(total=Sum("amount"))
             .order_by("-total")
         )
 
+        mpesa_queryset = MpesaTransaction.objects.filter(
+            user=request.user,
+            status="SUCCESS",
+            transaction_date__isnull=False
+        )
+
+        if start_date:
+            mpesa_queryset = mpesa_queryset.filter(
+                transaction_date__date__gte=start_date
+            )
+
+        if end_date:
+            mpesa_queryset = mpesa_queryset.filter(
+                transaction_date__date__lte=end_date
+            )
+
+        mpesa_expenses = mpesa_queryset.aggregate(
+            total=Sum("amount")
+        )["total"] or 0
+
+        total_expenses = expenses + mpesa_expenses
+
         return Response({
             "total_income": f"{income:.2f}",
-            "total_expenses": f"{expenses:.2f}",
-            "balance": f"{income - expenses:.2f}",
+            "total_expenses": f"{total_expenses:.2f}",
+            "balance": f"{income - total_expenses:.2f}",
+            "mpesa_expenses": f"{mpesa_expenses:.2f}",
             "spending_by_category": [
                 {
                     "category": item["category"],
-                    "total": f"{abs(item['total']):.2f}"
+                    "total": f"{item['total']:.2f}"
                 }
                 for item in spending
             ]

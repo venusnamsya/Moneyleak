@@ -10,10 +10,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from rest_framework.decorators import (
-    api_view,
-    permission_classes,
-)
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
@@ -31,29 +28,20 @@ def apply_callback(mpesa_transaction, data):
         raise ValueError("Missing stkCallback object")
 
     result_code = int(callback.get("ResultCode", -1))
-
-    mpesa_transaction.result_description = callback.get(
-        "ResultDesc", ""
-    )
+    mpesa_transaction.result_description = callback.get("ResultDesc", "")
     mpesa_transaction.callback_data = data
 
     if result_code == 0:
-        items = callback.get(
-            "CallbackMetadata", {}
-        ).get("Item", [])
-
+        items = callback.get("CallbackMetadata", {}).get("Item", [])
         metadata = {
             item.get("Name"): item.get("Value")
-            for item in items
-            if item.get("Name")
+            for item in items if item.get("Name")
         }
 
         receipt = metadata.get("MpesaReceiptNumber")
 
         if not receipt:
-            raise ValueError(
-                "Missing M-Pesa receipt number in success metadata"
-            )
+            raise ValueError("Missing M-Pesa receipt number")
 
         mpesa_transaction.receipt_number = receipt
         mpesa_transaction.amount = metadata.get(
@@ -66,8 +54,8 @@ def apply_callback(mpesa_transaction, data):
             parsed_date = datetime.strptime(
                 str(raw_date), "%Y%m%d%H%M%S"
             )
-            mpesa_transaction.transaction_date = (
-                timezone.make_aware(parsed_date)
+            mpesa_transaction.transaction_date = timezone.make_aware(
+                parsed_date
             )
 
         mpesa_transaction.status = "SUCCESS"
@@ -87,8 +75,7 @@ def mpesa_callback(request):
 
         if not checkout_id:
             return JsonResponse(
-                {"error": "Missing CheckoutRequestID"},
-                status=400,
+                {"error": "Missing CheckoutRequestID"}, status=400
             )
 
         with db_transaction.atomic():
@@ -108,44 +95,21 @@ def mpesa_callback(request):
 
         return JsonResponse({
             "ResultCode": 0,
-            "ResultDesc": "Accepted",
+            "ResultDesc": "Accepted"
         })
 
-    except (
-        KeyError,
-        ValueError,
-        TypeError,
-        json.JSONDecodeError,
-    ) as exc:
-        logger.warning("M-Pesa callback parsing failed: %s", exc)
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+        logger.warning("M-Pesa callback parsing failed")
         return JsonResponse(
-            {"error": "Invalid callback payload structure"},
-            status=400,
+            {"error": "Invalid callback payload structure"}, status=400
         )
 
 
-@csrf_exempt
-@require_POST
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def stk_push(request):
-    # Require a valid JWT access token.
-    from rest_framework_simplejwt.authentication import (
-        JWTAuthentication,
-    )
-
-    authenticated = JWTAuthentication().authenticate(request)
-
-    if authenticated is None:
-        return JsonResponse(
-            {"error": "Authentication required. Supply a valid Bearer token."},
-            status=401,
-        )
-
-    user, token = authenticated
-
     try:
-        body = json.loads(request.body)
-
-        phone = re.sub(r"[\s+]", "", body.get("phone", ""))
+        phone = re.sub(r"[\s+]", "", request.data.get("phone", ""))
 
         if phone.startswith("0"):
             phone = "254" + phone[1:]
@@ -153,43 +117,37 @@ def stk_push(request):
             phone = "254" + phone
 
         if not re.fullmatch(r"254\d{9}", phone):
-            return JsonResponse(
-                {
-                    "error": "Enter a valid Kenyan mobile number "
-                             "(e.g. 2547XXXXXXXX)"
-                },
-                status=400,
+            return Response(
+                {"error": "Enter a valid Kenyan mobile number."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        amount = Decimal(str(body.get("amount", "")))
+        amount = Decimal(str(request.data.get("amount", "")))
 
         if not amount.is_finite() or amount != amount.to_integral_value():
-            return JsonResponse(
-                {"error": "Amount must be a whole number"},
-                status=400,
+            return Response(
+                {"error": "Amount must be a whole number."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         if amount < 1 or amount > 150000:
-            return JsonResponse(
-                {"error": "Amount is outside the allowed test range"},
-                status=400,
+            return Response(
+                {"error": "Amount is outside the allowed test range."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
         result = initiate_stk_push(
             phone=phone,
-            amount=int(amount),
+            amount=int(amount)
         )
 
         checkout_id = result.get("CheckoutRequestID")
         merchant_id = result.get("MerchantRequestID")
 
         if not checkout_id or not merchant_id:
-            return JsonResponse(
-                {
-                    "error": "Daraja did not return the required request IDs",
-                    "daraja": result,
-                },
-                status=502,
+            return Response(
+                {"error": "Daraja did not return the required request IDs."},
+                status=status.HTTP_502_BAD_GATEWAY
             )
 
         with db_transaction.atomic():
@@ -197,13 +155,13 @@ def stk_push(request):
                 MpesaTransaction.objects.get_or_create(
                     checkout_request_id=checkout_id,
                     defaults={
-                        "user": user,
+                        "user": request.user,
                         "merchant_request_id": merchant_id,
                         "phone_number": phone,
                         "amount": amount,
                         "account_reference": "MoneyLeak",
                         "status": "PENDING",
-                    },
+                    }
                 )
             )
 
@@ -214,33 +172,28 @@ def stk_push(request):
             if pending_callback:
                 apply_callback(
                     mpesa_transaction,
-                    pending_callback.payload,
+                    pending_callback.payload
                 )
                 pending_callback.delete()
 
-        return JsonResponse({
+        return Response({
             "message": "STK Push requested",
             "status": mpesa_transaction.status,
             "checkout_request_id": checkout_id,
             "created": created,
-            "daraja_response": result,
         })
 
-    except (
-        ValueError,
-        InvalidOperation,
-        TypeError,
-        json.JSONDecodeError,
-    ):
-        return JsonResponse(
-            {"error": "Invalid phone number, amount or JSON"},
-            status=400,
+    except (ValueError, InvalidOperation, TypeError):
+        return Response(
+            {"error": "Invalid phone number, amount or request data."},
+            status=status.HTTP_400_BAD_REQUEST
         )
+
     except Exception:
         logger.exception("STK Push initiation failed")
-        return JsonResponse(
+        return Response(
             {"error": "Unable to initiate payment. Check server logs."},
-            status=502,
+            status=status.HTTP_502_BAD_GATEWAY
         )
 
 
@@ -269,5 +222,5 @@ def mpesa_transaction_history(request):
 
     return Response({
         "count": len(data),
-        "transactions": data,
+        "transactions": data
     })
