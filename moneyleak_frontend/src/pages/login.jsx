@@ -34,7 +34,6 @@ export default function Login() {
         await api.post("/api/auth/register/", {
           username,
           email,
-          phone,
           password,
         });
 

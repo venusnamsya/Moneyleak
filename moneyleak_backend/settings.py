@@ -28,7 +28,7 @@ load_dotenv(BASE_DIR / ".env")
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-fallback-key-change-me")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "False")=="True"
 
 ALLOWED_HOSTS = ['.ngrok-free.dev', 'localhost', '127.0.0.1', '.onrender.com']
 

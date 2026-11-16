@@ -7,13 +7,13 @@ const api = axios.create({
   },
 });
 
-// Attach tokens only to protected requests
 api.interceptors.request.use((config) => {
   const url = config.url || "";
 
   const isAuthRequest =
     url.includes("/api/auth/login/") ||
-    url.includes("/api/auth/register/");
+    url.includes("/api/auth/register/") ||
+    url.includes("/api/auth/token/refresh/");
 
   if (isAuthRequest) {
     delete config.headers.Authorization;
