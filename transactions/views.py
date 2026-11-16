@@ -1,105 +1,226 @@
+import csv
+import io
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import permissions, viewsets
-from django.db.models import Sum
+from rest_framework import permissions, status
 
 from .models import Transaction
-from .serializers import TransactionSerializer
-from mpesa.models import MpesaTransaction
 
 
-class TransactionViewSet(viewsets.ModelViewSet):
-    serializer_class = TransactionSerializer
+def parse_csv_date(value):
+    formats = [
+        "%Y-%m-%d",
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+        "%d.%m.%Y",
+        "%m/%d/%Y",
+        "%Y/%m/%d",
+    ]
+
+    for date_format in formats:
+        try:
+            return datetime.strptime(value.strip(), date_format).date()
+        except ValueError:
+            continue
+
+    raise ValueError(
+        "Invalid date. Use YYYY-MM-DD or DD/MM/YYYY."
+    )
+
+
+def parse_csv_amount(value):
+    cleaned = (
+        value.strip()
+        .replace(",", "")
+        .replace("KSh", "")
+        .replace("KES", "")
+        .replace("ksh", "")
+        .replace("kes", "")
+        .strip()
+    )
+
+    try:
+        amount = Decimal(cleaned)
+    except InvalidOperation:
+        raise ValueError("Invalid amount.")
+
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("Amount must be greater than zero.")
+
+    return amount
+
+
+class CSVImportView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
-    def get_queryset(self):
-        queryset = Transaction.objects.filter(user=self.request.user)
+    def post(self, request):
+        uploaded_file = request.FILES.get("file")
 
-        search = self.request.query_params.get("search")
-
-        if search:
-            queryset = queryset.filter(
-                description__icontains=search
+        if not uploaded_file:
+            return Response(
+                {"error": "Please select a CSV file."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return queryset
-
-    def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
-
-
-class AnalyticsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request):
-        queryset = Transaction.objects.filter(user=request.user)
-
-        category = request.query_params.get("category")
-        search = request.query_params.get("search")
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
-
-        if category:
-            queryset = queryset.filter(category=category)
-
-        if search:
-            queryset = queryset.filter(
-                description__icontains=search
+        if not uploaded_file.name.lower().endswith(".csv"):
+            return Response(
+                {"error": "Only CSV files are supported."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if start_date:
-            queryset = queryset.filter(date__gte=start_date)
+        try:
+            raw_content = uploaded_file.read()
 
-        if end_date:
-            queryset = queryset.filter(date__lte=end_date)
+            try:
+                content = raw_content.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                content = raw_content.decode("cp1252")
 
-        income = queryset.filter(
-            category="Income"
-        ).aggregate(total=Sum("amount"))["total"] or 0
+            reader = csv.DictReader(io.StringIO(content))
 
-        expenses = queryset.exclude(
-            category="Income"
-        ).aggregate(total=Sum("amount"))["total"] or 0
+            if not reader.fieldnames:
+                return Response(
+                    {"error": "The CSV file is empty or has no headers."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        spending = (
-            queryset.exclude(category="Income")
-            .values("category")
-            .annotate(total=Sum("amount"))
-            .order_by("-total")
-        )
+            headers = {
+                (header or "").strip().lower()
+                for header in reader.fieldnames
+            }
 
-        mpesa_queryset = MpesaTransaction.objects.filter(
-            user=request.user,
-            status="SUCCESS",
-            transaction_date__isnull=False
-        )
+            required = {
+                "date",
+                "description",
+                "amount",
+                "category",
+            }
 
-        if start_date:
-            mpesa_queryset = mpesa_queryset.filter(
-                transaction_date__date__gte=start_date
-            )
+            missing = required - headers
 
-        if end_date:
-            mpesa_queryset = mpesa_queryset.filter(
-                transaction_date__date__lte=end_date
-            )
+            if missing:
+                return Response(
+                    {
+                        "error": (
+                            "Missing required columns: "
+                            + ", ".join(sorted(missing))
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        mpesa_expenses = mpesa_queryset.aggregate(
-            total=Sum("amount")
-        )["total"] or 0
+            allowed_categories = {
+                choice[0].lower(): choice[0]
+                for choice in Transaction.CATEGORY_CHOICES
+            }
 
-        total_expenses = expenses + mpesa_expenses
+            created = 0
+            errors = []
 
-        return Response({
-            "total_income": f"{income:.2f}",
-            "total_expenses": f"{total_expenses:.2f}",
-            "balance": f"{income - total_expenses:.2f}",
-            "mpesa_expenses": f"{mpesa_expenses:.2f}",
-            "spending_by_category": [
-                {
-                    "category": item["category"],
-                    "total": f"{item['total']:.2f}"
+            for line_number, row in enumerate(reader, start=2):
+
+                if not row or not any(
+                    str(value or "").strip()
+                    for value in row.values()
+                ):
+                    continue
+
+                normalised_row = {
+                    (key or "").strip().lower(): (
+                        value or ""
+                    ).strip()
+                    for key, value in row.items()
+                    if key is not None
                 }
-                for item in spending
-            ]
-        })
+
+                try:
+                    date_value = parse_csv_date(
+                        normalised_row.get("date", "")
+                    )
+
+                    description = normalised_row.get(
+                        "description", ""
+                    )
+
+                    if not description:
+                        raise ValueError(
+                            "Description is required."
+                        )
+
+                    if len(description) > 255:
+                        raise ValueError(
+                            "Description cannot exceed 255 characters."
+                        )
+
+                    amount = parse_csv_amount(
+                        normalised_row.get("amount", "")
+                    )
+
+                    category_input = normalised_row.get(
+                        "category", ""
+                    ).lower()
+
+                    category = allowed_categories.get(
+                        category_input
+                    )
+
+                    if not category:
+                        raise ValueError(
+                            "Unknown category. Check your category name."
+                        )
+
+                    Transaction.objects.create(
+                        user=request.user,
+                        date=date_value,
+                        description=description,
+                        amount=amount,
+                        category=category,
+                    )
+
+                    created += 1
+
+                except (
+                    ValueError,
+                    KeyError,
+                    InvalidOperation,
+                ) as exc:
+                    errors.append({
+                        "line": line_number,
+                        "error": str(exc),
+                    })
+
+            skipped = len(errors)
+
+            if created and skipped:
+                message = (
+                    f"Imported {created} transactions. "
+                    f"{skipped} rows were skipped."
+                )
+            elif created:
+                message = (
+                    f"Successfully imported {created} transactions."
+                )
+            else:
+                message = (
+                    "No transactions were imported. "
+                    "Please check the CSV errors."
+                )
+
+            return Response(
+                {
+                    "message": message,
+                    "created": created,
+                    "skipped": skipped,
+                    "errors": errors,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except (UnicodeDecodeError, csv.Error):
+            return Response(
+                {"error": "Unable to read this CSV file."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )

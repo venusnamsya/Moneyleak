@@ -7,7 +7,7 @@ import {
   X,
   FileSpreadsheet,
 } from "lucide-react";
-import {useSearchParams} from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import api from "../services/api";
 
 const categories = [
@@ -25,6 +25,7 @@ const categories = [
 function getToday() {
   const date = new Date();
   const offset = date.getTimezoneOffset();
+
   return new Date(date.getTime() - offset * 60000)
     .toISOString()
     .slice(0, 10);
@@ -38,7 +39,7 @@ function formatCurrency(value) {
 }
 
 function Transactions() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   const [transactions, setTransactions] = useState([]);
   const [search, setSearch] = useState(
@@ -52,8 +53,10 @@ function Transactions() {
   const [formError, setFormError] = useState("");
 
   const csvInputRef = useRef(null);
+
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [uploadErrors, setUploadErrors] = useState([]);
 
   const [form, setForm] = useState({
     description: "",
@@ -62,7 +65,7 @@ function Transactions() {
     amount: "",
   });
 
-  // Load transactions from Django.
+  // Fetch transactions from Django.
   const fetchTransactions = async () => {
     try {
       setLoading(true);
@@ -76,10 +79,11 @@ function Transactions() {
 
       setTransactions(records);
     } catch (err) {
-      console.error(err);
+      console.error("Fetch transactions error:", err);
+
       setError(
         err.response?.data?.detail ||
-          "Unable to load transactions. Please try again."
+        "Unable to load transactions. Please try again."
       );
     } finally {
       setLoading(false);
@@ -92,7 +96,7 @@ function Transactions() {
 
   // Filter transactions.
   const filteredTransactions = transactions.filter((item) => {
-    const matchesSearch = item.description
+    const matchesSearch = (item.description || "")
       .toLowerCase()
       .includes(search.toLowerCase());
 
@@ -111,7 +115,7 @@ function Transactions() {
     .filter((item) => item.category !== "Income")
     .reduce((sum, item) => sum + Number(item.amount), 0);
 
-  // Add a transaction to Django.
+  // Add manual transaction.
   const handleAddTransaction = async (event) => {
     event.preventDefault();
     setFormError("");
@@ -156,24 +160,25 @@ function Transactions() {
 
       setFormError(
         data?.description?.[0] ||
-          data?.category?.[0] ||
-          data?.amount?.[0] ||
-          data?.date?.[0] ||
-          data?.detail ||
-          "Unable to save transaction. Please try again."
+        data?.category?.[0] ||
+        data?.amount?.[0] ||
+        data?.date?.[0] ||
+        data?.detail ||
+        "Unable to save transaction. Please try again."
       );
     } finally {
       setSaving(false);
     }
   };
 
-  // Import CSV file into Django.
+  // Import CSV into Django.
   const handleCsvImport = async (event) => {
     const file = event.target.files?.[0];
 
     if (!file) return;
 
     setUploadMessage("");
+    setUploadErrors([]);
     setError("");
 
     if (!file.name.toLowerCase().endsWith(".csv")) {
@@ -193,11 +198,18 @@ function Transactions() {
         formData
       );
 
+      const data = response.data;
+
       setUploadMessage(
-        response.data.message || "CSV imported successfully."
+        data.message ||
+        `Imported ${data.created || 0} transactions.`
       );
 
-      await fetchTransactions();
+      setUploadErrors(data.errors || []);
+
+      if (Number(data.created) > 0) {
+        await fetchTransactions();
+      }
     } catch (err) {
       console.error("CSV import error:", err);
 
@@ -205,9 +217,9 @@ function Transactions() {
 
       setError(
         data?.detail ||
-          data?.error ||
-          data?.message ||
-          "CSV import failed. Please check your file and try again."
+        data?.error ||
+        data?.message ||
+        "CSV import failed. Please check your file and try again."
       );
     } finally {
       setUploading(false);
@@ -248,6 +260,7 @@ function Transactions() {
           </button>
 
           <button
+            type="button"
             className="primary-button"
             onClick={() => {
               setFormError("");
@@ -267,10 +280,28 @@ function Transactions() {
         </p>
       )}
 
+      {uploadErrors.length > 0 && (
+        <div className="error-message">
+          <strong>Rows that could not be imported:</strong>
+
+          <ul>
+            {uploadErrors.slice(0, 5).map((item, index) => (
+              <li key={index}>
+                Row {item.line}: {item.error}
+              </li>
+            ))}
+          </ul>
+
+          {uploadErrors.length > 5 && (
+            <p>
+              And {uploadErrors.length - 5} more errors.
+            </p>
+          )}
+        </div>
+      )}
+
       {error && (
-        <p className="error-message">
-          {error}
-        </p>
+        <p className="error-message">{error}</p>
       )}
 
       {/* TRANSACTION SUMMARY */}
@@ -289,7 +320,9 @@ function Transactions() {
 
         <div className="transaction-summary-card">
           <span>Total Expenses</span>
-          <strong>KSh {formatCurrency(totalExpenses)}</strong>
+          <strong>
+            KSh {formatCurrency(totalExpenses)}
+          </strong>
         </div>
       </div>
 
