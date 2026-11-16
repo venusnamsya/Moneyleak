@@ -38,11 +38,12 @@ function formatCurrency(value) {
 }
 
 function Transactions() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [transactions, setTransactions] = useState([]);
   const [search, setSearch] = useState(
     searchParams.get("search") || ""
   );
-  const [searchParams, setSearchParams] = useSearchParams();
   const [category, setCategory] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);

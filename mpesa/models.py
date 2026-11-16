@@ -28,6 +28,13 @@ class MpesaTransaction(models.Model):
         null=True,
         blank=True,
     )
+    main_transaction = models.OneToOneField(
+        "transactions.Transaction",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="mpesa_payment"
+    )
 
     checkout_request_id = models.CharField(
         max_length=100, unique=True

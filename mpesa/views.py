@@ -4,6 +4,8 @@ import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
+fr60 transactions.models import Transaction
+
 from django.db import transaction as db_transaction
 from django.http import JsonResponse
 from django.utils import timezone
@@ -59,10 +61,33 @@ def apply_callback(mpesa_transaction, data):
             )
 
         mpesa_transaction.status = "SUCCESS"
+
     else:
         mpesa_transaction.status = "FAILED"
 
     mpesa_transaction.save()
+
+    if (
+        mpesa_transaction.status == "SUCCESS"
+        and mpesa_transaction.user_id
+        and not mpesa_transaction.main_transaction_id
+    ):
+        main_transaction = Transaction.objects.create(
+            user=mpesa_transaction.user,
+            date=(
+                mpesa_transaction.transaction_date
+                or mpesa_transaction.created_at
+            ).date(),
+            description=(
+                mpesa_transaction.description
+                or "M-Pesa payment"
+            ),
+            amount=mpesa_transaction.amount,
+            category=mpesa_transaction.category,
+        )
+
+        mpesa_transaction.main_transaction = main_transaction
+        mpesa_transaction.save(update_fields=["main_transaction"])
 
 
 @csrf_exempt
