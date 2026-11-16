@@ -157,8 +157,7 @@ MPESA_PASSKEY = os.getenv("MPESA_PASSKEY")
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://moneyleak-fkr54q6g9-venusnamsyas-project.vercel.app",
-    "https://moneyleak-j9sl081in-venusnamsyas-project.vercel.app",
+    "https://moneyleak-three.vercel.app",
 ]
 from datetime import timedelta
 
