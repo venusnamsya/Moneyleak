@@ -30,7 +30,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-fallback-key-chan
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['.ngrok-free.dev', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['.ngrok-free.dev', 'localhost', '127.0.0.1', 'https://onrender.com']
 
 
 # Application definition
@@ -155,7 +155,8 @@ MPESA_PASSKEY = os.getenv("MPESA_PASSKEY")
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
-    "http://127.0.0.1:5173"
+    "http://127.0.0.1:5173",
+    "https:vercel.app",
 ]
 from datetime import timedelta
 
