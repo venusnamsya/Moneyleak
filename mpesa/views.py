@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-fr60 transactions.models import Transaction
+from transactions.models import Transaction
 
 from django.db import transaction as db_transaction
 from django.http import JsonResponse
