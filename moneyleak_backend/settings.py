@@ -30,7 +30,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-dev-fallback-key-chan
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['.ngrok-free.dev', 'localhost', '127.0.0.1', 'https://onrender.com']
+ALLOWED_HOSTS = ['.ngrok-free.dev', 'localhost', '127.0.0.1', '.onrender.com']
+
 
 
 # Application definition
