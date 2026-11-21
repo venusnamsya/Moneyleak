@@ -1,23 +1,26 @@
 MoneyLeak – Personal Finance Tracking System
 
-Overview
+1. Overview
 
 MoneyLeak is a personal finance tracking application designed to help users monitor, organise and understand their financial transactions.
 
-The system provides a centralised dashboard where users can view their income, expenditure, transaction history and spending patterns.
+The application provides a centralised dashboard where users can view income, expenditure, transaction history and spending patterns.
 
-MoneyLeak integrates with the Safaricom M-Pesa Daraja API to support STK Push payments and record payment transactions.
+MoneyLeak integrates with the Safaricom M-Pesa Daraja API to initiate STK Push requests, receive payment callbacks and maintain M-Pesa transaction records.
 
-Objectives
+The project combines financial management, transaction automation and data visualisation to make personal financial tracking more accessible.
+
+2. Project Objectives
 
 * Help users monitor their financial transactions.
 * Categorise expenditure to understand spending habits.
 * Provide summaries of income, expenses and balances.
-* Simplify the tracking of M-Pesa payments.
-* Present financial information through visual dashboards and analytics.
-* Support importing financial transactions from CSV files.
+* Simplify the recording of M-Pesa payments.
+* Present financial information through dashboards and analytics.
+* Support importing existing financial records from CSV files.
+* Provide secure user authentication and account management.
 
-Technologies Used
+3. Technologies Used
 
 Backend
 
@@ -27,6 +30,7 @@ Backend
 * SQLite
 * SimpleJWT Authentication
 * Safaricom Daraja API
+* Africa’s Talking SMS API (password recovery integration under testing)
 
 Frontend
 
@@ -35,56 +39,70 @@ Frontend
 * JavaScript
 * Axios
 * CSS
+* React Router
+* Lucide React
 
-Key Features
+4. Key Features
 
-1. User Authentication
+User Authentication
 
 * User registration.
-* Secure login.
-* JWT-based authentication.
+* Email-based login.
+* JWT access and refresh token authentication.
 * Protected API endpoints.
+* Phone number profile management.
+* SMS-based OTP password recovery (under testing).
 
-2. Dashboard
+Dashboard
 
 * Financial summary cards.
 * Income and expenditure overview.
 * Transaction summaries.
 * Financial activity overview.
 
-3. Transaction Management
+Transaction Management
 
-* View financial transactions.
+* Retrieve financial transactions from the backend.
+* View transaction descriptions, dates and amounts.
 * Organise transactions into categories.
-* Track transaction descriptions, dates and amounts.
-* Retrieve transaction records from the backend.
+* Manage transaction records through authenticated endpoints.
 
-4. Financial Analytics
+Financial Analytics
 
+* Income and expenditure summaries.
+* Balance calculations.
 * Monthly expenditure analysis.
 * Spending breakdown by category.
-* Income and expenditure summaries.
+* Category filtering.
+* Transaction search.
 * Date-range filtering.
 
-5. M-Pesa Integration
+M-Pesa Integration
 
-MoneyLeak uses the Safaricom Daraja API to support M-Pesa STK Push transactions.
+MoneyLeak integrates with the Safaricom Daraja API using the STK Push functionality.
 
-The integration supports:
+The integration includes:
 
 * Initiating STK Push payment requests.
 * Recording payment details.
-* Processing Safaricom payment callbacks.
-* Tracking pending, successful and failed transactions.
-* Displaying M-Pesa transaction history.
+* Storing Checkout Request IDs and Merchant Request IDs.
+* Receiving Safaricom payment callbacks.
+* Tracking pending, successful and failed payment statuses.
+* Recording M-Pesa receipt numbers.
+* Maintaining M-Pesa transaction history.
 
-6. CSV Import
+Development note: End-to-end callback processing and automatic transaction status updates are still undergoing testing.
 
-The application includes a CSV transaction import feature intended to support importing existing financial records.
+CSV Import
 
-Transaction Categories
+* CSV-based financial transaction import functionality.
+* Support for importing existing transaction records.
 
-MoneyLeak supports the following categories:
+Further testing and improvements to statement import processing are ongoing.
+
+5. Transaction Categories
+
+MoneyLeak currently supports:
 
 * Food
 * Transport
@@ -96,33 +114,49 @@ MoneyLeak supports the following categories:
 * Income
 * Other
 
-Project Structure
+6. Project Structure
+
+The project is organised into separate backend and frontend components.
 
 MoneyLeak/
 │
-├── manage.py
-├── db.sqlite3
-├── .env
-│
-├── users/
-├── transactions/
-├── mpesa/
-│   ├── models.py
-│   ├── views.py
-│   ├── urls.py
+├── moneyleak_backend/
+│   ├── manage.py
+│   ├── requirements.txt
+│   ├── mpesa_service.py
+│   │
+│   ├── users/
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   └── urls.py
+│   │
+│   ├── transactions/
+│   │   ├── models.py
+│   │   ├── serializers.py
+│   │   ├── views.py
+│   │   └── urls.py
+│   │
+│   └── mpesa/
+│       ├── models.py
+│       ├── views.py
+│       └── urls.py
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
 │   │   ├── pages/
 │   │   ├── services/
-│   │   ├── app.jsx
+│   │   ├── App.jsx
 │   │   └── index.css
+│   │
 │   └── package.json
 │
 └── README.md
 
-Installation and Setup
+This is a simplified representation of the application structure.
+
+7. Installation and Setup
 
 Prerequisites
 
@@ -131,26 +165,26 @@ Prerequisites
 * Git
 * Safaricom Daraja developer account for M-Pesa sandbox testing
 
-1. Clone the Repository
+Clone the Repository
 
 git clone YOUR_REPOSITORY_URL
 cd moneyleak_backend
 
-2. Set Up the Backend
+Backend Setup
 
 Create and activate a virtual environment:
 
 python -m venv .venv
 
-Install the backend dependencies using the project’s requirements file, if available:
+Install dependencies:
 
 pip install -r requirements.txt
 
-Run migrations:
+Run database migrations:
 
 python manage.py migrate
 
-Start the Django development server:
+Start the development server:
 
 python manage.py runserver
 
@@ -158,7 +192,7 @@ The backend runs at:
 
 http://127.0.0.1:8000
 
-3. Set Up the Frontend
+Frontend Setup
 
 Open another terminal:
 
@@ -170,7 +204,7 @@ The Vite development server normally runs at:
 
 http://localhost:5173
 
-Environment Variables
+8. Environment Variables
 
 Create a .env file in the backend root directory.
 
@@ -181,54 +215,79 @@ MPESA_CONSUMER_SECRET=your_consumer_secret
 MPESA_SHORTCODE=your_shortcode
 MPESA_PASSKEY=your_passkey
 MPESA_CALLBACK_URL=your_callback_url
+AFRICASTALKING_USERNAME=your_username
+AFRICASTALKING_API_KEY=your_api_key
 
-Never commit real credentials, access tokens or secret keys to a public repository.
+Never commit real credentials, API keys, access tokens or secret keys to a public repository.
 
-M-Pesa Integration
+9. M-Pesa Integration Workflow
 
-MoneyLeak uses Safaricom’s Daraja API sandbox environment for payment testing.
-
-The STK Push process involves:
+The STK Push process follows these steps:
 
 1. The user enters payment information.
-2. MoneyLeak requests an STK Push.
+2. MoneyLeak sends an STK Push request to Safaricom.
 3. Safaricom sends a payment prompt to the user’s phone.
-4. The user authorises the payment.
+4. The user authorises or cancels the payment.
 5. Safaricom sends a callback to MoneyLeak.
-6. The backend updates the transaction status.
+6. The backend processes the callback response.
+7. The transaction status is updated.
+8. Successful payments can be recorded in the main transaction system.
 
-Current Development Status
+The expected transaction statuses are:
+
+* PENDING
+* SUCCESS
+* FAILED
+
+The callback workflow is currently undergoing end-to-end verification.
+
+10. Current Development Status
 
 MoneyLeak is under active development.
 
-Implemented components include authentication, transaction management, financial analytics, and the M-Pesa STK Push integration.
+Implemented components
 
-Further work includes:
+* Django REST Framework backend.
+* React frontend.
+* JWT authentication.
+* Transaction management.
+* Financial analytics endpoints.
+* M-Pesa STK Push initiation.
+* M-Pesa transaction records and history.
+* CSV import functionality.
+* Phone number profile support.
 
-* Complete end-to-end testing of M-Pesa payments and callbacks.
-* Completing and testing CSV imports.
-* Integrating successful M-Pesa transactions into all analytics reports.
-* Expanding financial reporting.
-* Exploring bank deposit and bank statement integration.
+Components undergoing testing
 
-Security
+* SMS OTP password recovery.
+* M-Pesa callback delivery and processing.
+* Automatic updates of successful and failed payment statuses.
+* Integration of successful M-Pesa payments into financial analytics.
+* Complete CSV statement import workflow.
 
-* Authentication is handled using JWT.
-* Protected endpoints require authentication.
-* M-Pesa credentials are stored in environment variables.
-* Payment callbacks are processed by the backend.
+11. Security
 
-Additional production security and deployment measures will be required before public release.
+MoneyLeak incorporates several security measures:
 
-Future Improvements
+* JWT-based authentication.
+* Protected API endpoints.
+* Environment-based storage of sensitive API credentials.
+* User-associated financial transaction records.
+* Backend processing of M-Pesa callbacks.
+
+Additional security testing and production-hardening measures are required before public release.
+
+12. Future Improvements
 
 * Bank statement imports.
 * Bank transaction integration.
 * Improved financial reporting.
-* More advanced transaction categorisation.
+* Advanced transaction categorisation.
 * Budget tracking.
 * Expanded financial insights.
+* Improved payment reconciliation.
+* More comprehensive automated testing.
 
-Author
+13. Author
 
 Developed as a personal finance technology project as part of software development training at Zindua School.
