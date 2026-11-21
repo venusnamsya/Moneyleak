@@ -22,4 +22,5 @@ urlpatterns = [
     path('api/', include('transactions.urls')),
     path('api/auth/', include('users.urls')),
     path('mpesa/', include('mpesa.urls')),
+    path('api/payments/confirm/', mpesa_callback, name='mpesa-callback'),
 ]
