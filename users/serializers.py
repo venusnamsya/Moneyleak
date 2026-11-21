@@ -1,5 +1,9 @@
 from django.contrib.auth import get_user_model, authenticate
+from django.db import transaction
 from rest_framework import serializers
+import re
+
+from .models import UserProfile
 
 User = get_user_model()
 
@@ -12,10 +16,14 @@ class RegistrationSerializer(serializers.ModelSerializer):
     )
 
     email = serializers.EmailField(required=True)
+    phone = serializers.CharField(
+        write_only=True,
+        required=True
+    )
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "password"]
+        fields = ["id", "username", "email", "phone", "password"]
 
     def validate_email(self, value):
         value = value.strip().lower()
@@ -27,8 +35,43 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
         return value
 
+    def validate_phone(self, value):
+        digits = re.sub(r"\D", "", value.strip())
+
+        # Convert common Kenyan formats to international format.
+        if len(digits) == 10 and digits.startswith("0"):
+            digits = "254" + digits[1:]
+        elif len(digits) == 9 and digits.startswith(("7", "1")):
+            digits = "254" + digits
+
+        if not 8 <= len(digits) <= 15 or digits.startswith("0"):
+            raise serializers.ValidationError(
+                "Enter a valid international phone number."
+            )
+
+        phone = "+" + digits
+
+        if UserProfile.objects.filter(
+            phone_number=phone
+        ).exists():
+            raise serializers.ValidationError(
+                "An account with this phone number already exists."
+            )
+
+        return phone
+
+    @transaction.atomic
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        phone = validated_data.pop("phone")
+
+        user = User.objects.create_user(**validated_data)
+
+        UserProfile.objects.create(
+            user=user,
+            phone_number=phone
+        )
+
+        return user
 
 
 class EmailLoginSerializer(serializers.Serializer):

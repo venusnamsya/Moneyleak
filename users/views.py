@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework_simplejwt.tokens import RefreshToken
+from .models import UserProfile
 
 from .serializers import (
     RegistrationSerializer,
@@ -40,9 +41,12 @@ class EmailLoginView(APIView):
 def user_profile(request):
     user = request.user
 
+    profile, created =UserProfile.objects.get_or_create(user=user)
+
     return Response({
         "id": user.id,
         "username": user.username,
         "email": user.email,
+        "phone": profile.phone_number or ""
        
     })
