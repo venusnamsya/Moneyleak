@@ -193,9 +193,14 @@ function Transactions() {
     try {
       setUploading(true);
 
-      const response = await api.post(
+     const response = await api.post(
         "/api/import-csv/",
-        formData
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
       );
 
       const data = response.data;
